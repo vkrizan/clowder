@@ -1,4 +1,4 @@
-# Whippoorwill :bird: - Insights Platform Operator
+# Clowder :cat: - Insights Platform Operator
 
 An operator to deploy and operate cloud.redhat.com resources for Openshift.
 
