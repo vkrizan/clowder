@@ -15,11 +15,11 @@ Clowder Requirements
 --------------------
 
 * Accept platform configuration from the mounted JSON document
-  * Service hostnames
-  * Kafka boostrap URL
-  * Kafka topic names
-  * Web port number
-  * Metrics port number and path
+    * Service hostnames
+    * Kafka boostrap URL
+    * Kafka topic names
+    * Web port number
+    * Metrics port number and path
 * Deploy metrics endpoint on isolated port: If an app's metrics endpoint is deployed on the same port as a different web service, it needs to be modified to use a different port.  It is a `best practice`_ to deploy the metrics endpoint on a separate port.  
 * Use minio as the only object storage client library:  The operator will use minio to provision buckets in the ephemeral environments, and the `minio client library`_ supports connecting to Amazon S3.
 * Replace Deployment and Service resources with ClowdApp: This is what actually makes an app managed by the operator.
