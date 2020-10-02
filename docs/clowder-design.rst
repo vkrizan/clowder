@@ -51,7 +51,7 @@ operator, which is of course CRDs.  There will be two CRDs:
 
    This CR represents an instance of the entire cloud.redhat.com environment,
    e.g. stage or prod.  It contains configuration for various aspects of the
-   environment, implenented by *providers*.
+   environment, implemented by *providers*.
 
 2. ``ClowdApp``
 
@@ -93,7 +93,7 @@ Alternatives
    While this proposal falls neatly in the "app teams are responsible for the
    operation of their app" mantra, the overhead of having each team build and
    maintain their own operator is considered too high.  The design proposed in
-   this document helps draw the boundary between the responsibilites of the
+   this document helps draw the boundary between the responsibilities of the
    Cloud Dot platform team and the teams that build apps on that platform.
 
 2. One operator with a CRD for each app
@@ -101,10 +101,10 @@ Alternatives
    While this would provide significantly more flexibility for teams to
    configure their apps, many app teams would not add any custom attributes,
    thus essentially making their custom CRDs boilerplate code.  In addition,
-   theams that did in fact add custom fields would then have to maintain the
-   code required to reconcile them.o
+   teams that did in fact add custom fields would then have to maintain the
+   code required to reconcile them.
 
-   The design proposed in this document is intentionally opiniated and makes
+   The design proposed in this document is intentionally opinionated and makes
    choices on behalf of apps because more often than not dev teams do not have
    strong preferences on many operational aspects of their application.
 
