@@ -45,15 +45,15 @@ Proposal
 
 Build a single operator that handles the common use cases that cloud.redhat.com
 applications have.  These use cases will be encoded into the API of the
-operator, which is of course it CRDs.  There will be two CRDs:
+operator, which is of course CRDs.  There will be two CRDs:
 
-1. ClowdEnvironment
+1. ``ClowdEnvironment``
 
    This CR represents an instance of the entire cloud.redhat.com environment,
    e.g. stage or prod.  It contains configuration for various aspects of the
    environment, implenented by *providers*.
 
-2. ClowdApp
+2. ``ClowdApp``
 
    This CR represents a all the configuration an app needs to be deployed into
    the cloud.redhat.com environment, including:
@@ -66,7 +66,20 @@ operator, which is of course it CRDs.  There will be two CRDs:
    - Public API endpoint name(s)
    - SLO/SLI thresholds
 
+
+How these CRs will be translated into lower level resource types:
+
 .. image:: ../images/clowder-flow.svg
+
+Apps will consume their environmental configuration from a JSON document mounted
+in their app container.  This JSON document contains the various configuration
+that could be considered common across the platform or common kinds of resources
+that would be requested by an app on the platform, including:
+
+- Kafka topics
+- Connection information for Kafka, object storage, databases, and in-memory DBs
+- Port numbers for metrics and webservices
+- Public API endpoint prefix
 
 Common configuration interface:
 
