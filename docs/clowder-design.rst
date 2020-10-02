@@ -58,17 +58,18 @@ operator, which is of course it CRDs.  There will be two CRDs:
    This CR represents a all the configuration an app needs to be deployed into
    the cloud.redhat.com environment, including:
 
-       - One or more deployment specs
-       - Kafka topics
-       - Databases
-       - Object store buckets (e.g. S3)
-       - In-memory DBs (e.g. Redis)
-       - Public API endpoint name(s)
-       - SLO/SLI thresholds
+   - One or more deployment specs
+   - Kafka topics
+   - Databases
+   - Object store buckets (e.g. S3)
+   - In-memory DBs (e.g. Redis)
+   - Public API endpoint name(s)
+   - SLO/SLI thresholds
 
 .. image:: ../images/clowder-flow.svg
 
 Common configuration interface:
+
 .. image:: ../images/clowder-new.svg
 
 Alternatives
