@@ -75,7 +75,24 @@ Common configuration interface:
 Alternatives
 ------------
 
-- One operator per app with a shared library between them
-- One operator with a CRD for each app
+1. One operator per app, perhaps with a shared library between them
+
+   While this proposal falls neatly in the "app teams are responsible for the
+   operation of their app" mantra, the overhead of having each team build and
+   maintain their own operator is considered too high.  The design proposed in
+   this document helps draw the boundary between the responsibilites of the
+   Cloud Dot platform team and the teams that build apps on that platform.
+
+2. One operator with a CRD for each app
+
+   While this would provide significantly more flexibility for teams to
+   configure their apps, many app teams would not add any custom attributes,
+   thus essentially making their custom CRDs boilerplate code.  In addition,
+   theams that did in fact add custom fields would then have to maintain the
+   code required to reconcile them.o
+
+   The design proposed in this document is intentionally opiniated and makes
+   choices on behalf of apps because more often than not dev teams do not have
+   strong preferences on many operational aspects of their application.
 
 .. vim: tw=80
