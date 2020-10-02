@@ -9,7 +9,7 @@ application for cloud.redhat.com, particularly if they're unfamiliar working in
 a cloud-native environment before.
 
 Additionally, enforcing standards and consistency across cloud.redhat.com
-applications is difficult because of the number of disparate teams arcross the
+applications is difficult because of the number of disparate teams across the
 enterprise that contribute to the ecosystem.
 
 Similar to application consistency, it is difficult for engineers to be able to
@@ -28,7 +28,7 @@ Goals
 -----
 
 - Abstract Kubernetes environment and configuration details from applications
-- Enable engineers to deploy their appliation in every Kubernetes environmet
+- Enable engineers to deploy their application in every Kubernetes environment
   (i.e. dev, stage, prod) with minimal changes to their custom resources.
 - Increase operational consistency between cloud.redhat.com applications,
   including rollout parameters and pod affinity.
