@@ -6,7 +6,6 @@
 
 .Packages
 - xref:{anchor_prefix}-cloud-redhat-com-v1alpha1[$$cloud.redhat.com/v1alpha1$$]
-- xref:{anchor_prefix}-cyndi-cloud-redhat-com-v1alpha1[$$cyndi.cloud.redhat.com/v1alpha1$$]
 
 
 [id="{anchor_prefix}-cloud-redhat-com-v1alpha1"]
@@ -289,6 +288,7 @@ DatabaseConfig configures the Clowder provider controlling the creation of Datab
 | Field | Description
 | *`mode`* __DatabaseMode__ | The mode of operation of the Clowder Database Provider. Valid options are: (*_app-interface_*) where the provider will pass through database credentials found in the secret defined by the database name in the ClowdApp, and (*_local_*) where the provider will spin up a local instance of the database.
 | *`pvc`* __boolean__ | If using the (*_local_*) mode and PVC is set to true, this instructs the local Database instance to use a PVC instead of emptyDir for its volumes.
+| *`tShirtSizeDefinitions`* __xref:{anchor_prefix}-github-com-redhatinsights-clowder-apis-cloud-redhat-com-v1alpha1-tshirtsizedefinitions[$$TShirtSizeDefinitions$$]__ | 
 |===
 
 
@@ -308,6 +308,7 @@ DatabaseSpec is a struct defining a database to be exposed to a ClowdApp.
 | *`version`* __integer__ | Defines the Version of the PostGreSQL database, defaults to 12.
 | *`name`* __string__ | Defines the Name of the database to be created. This will be used as the name of the logical database inside the database server in (*_local_*) mode and the name of the secret to be used for Database configuration in (*_app-interface_*) mode.
 | *`sharedDbAppName`* __string__ | Defines the Name of the app to share a database from
+| *`dbTShirtSize`* __TShirtSize__ | T-shirt size, one of small, medium, large
 |===
 
 
@@ -513,9 +514,9 @@ KafkaClusterConfig defines options related to the Kafka cluster managed/monitore
 | *`storageSize`* __string__ | Persistent volume storage size. If unset, default is '1Gi' Only applies when KafkaConfig.PVC is set to 'true'
 | *`deleteClaim`* __boolean__ | Delete persistent volume claim if the Kafka cluster is deleted Only applies when KafkaConfig.PVC is set to 'true'
 | *`version`* __string__ | Version. If unset, default is '2.5.0'
-| *`config`* __map[string]string__ | Config full options
-| *`jvmOptions`* __xref:{anchor_prefix}-github-com-redhatinsights-strimzi-client-go-apis-kafka-strimzi-io-v1beta1-kafkaspeckafkajvmoptions[$$KafkaSpecKafkaJvmOptions$$]__ | JVM Options
-| *`resources`* __xref:{anchor_prefix}-github-com-redhatinsights-strimzi-client-go-apis-kafka-strimzi-io-v1beta1-kafkaspeckafkaresources[$$KafkaSpecKafkaResources$$]__ | Resource Limits
+| *`config`* __object (keys:string, values:string)__ | Config full options
+| *`jvmOptions`* __xref:{anchor_prefix}-github-com-redhatinsights-strimzi-client-go-apis-kafka-strimzi-io-v1beta2-kafkaspeckafkajvmoptions[$$KafkaSpecKafkaJvmOptions$$]__ | JVM Options
+| *`resources`* __xref:{anchor_prefix}-github-com-redhatinsights-strimzi-client-go-apis-kafka-strimzi-io-v1beta2-kafkaspeckafkaresources[$$KafkaSpecKafkaResources$$]__ | Resource Limits
 |===
 
 
@@ -844,6 +845,25 @@ ServiceMeshConfig determines if this env should be part of a service mesh and, i
 |===
 
 
+[id="{anchor_prefix}-github-com-redhatinsights-clowder-apis-cloud-redhat-com-v1alpha1-tshirtsizedefinitions"]
+==== TShirtSizeDefinitions 
+
+
+
+.Appears In:
+****
+- xref:{anchor_prefix}-github-com-redhatinsights-clowder-apis-cloud-redhat-com-v1alpha1-databaseconfig[$$DatabaseConfig$$]
+****
+
+[cols="25a,75a", options="header"]
+|===
+| Field | Description
+| *`small`* __string__ | Small size definition
+| *`medium`* __string__ | Medium size definition
+| *`large`* __string__ | Large size definition
+|===
+
+
 [id="{anchor_prefix}-github-com-redhatinsights-clowder-apis-cloud-redhat-com-v1alpha1-testingconfig"]
 ==== TestingConfig 
 
@@ -951,82 +971,5 @@ WebServices defines the structs for the three exposed web services: public, priv
 | *`private`* __xref:{anchor_prefix}-github-com-redhatinsights-clowder-apis-cloud-redhat-com-v1alpha1-privatewebservice[$$PrivateWebService$$]__ | 
 | *`metrics`* __xref:{anchor_prefix}-github-com-redhatinsights-clowder-apis-cloud-redhat-com-v1alpha1-metricswebservice[$$MetricsWebService$$]__ | 
 |===
-
-
-
-[id="{anchor_prefix}-cyndi-cloud-redhat-com-v1alpha1"]
-=== cyndi.cloud.redhat.com/v1alpha1
-
-Package v1alpha1 contains API Schema definitions for the cyndi v1alpha1 API group
-
-.Resource Types
-- xref:{anchor_prefix}-github-com-redhatinsights-clowder-apis-cyndi-operator-v1alpha1-cyndipipeline[$$CyndiPipeline$$]
-- xref:{anchor_prefix}-github-com-redhatinsights-clowder-apis-cyndi-operator-v1alpha1-cyndipipelinelist[$$CyndiPipelineList$$]
-
-
-
-[id="{anchor_prefix}-github-com-redhatinsights-clowder-apis-cyndi-operator-v1alpha1-cyndipipeline"]
-==== CyndiPipeline 
-
-CyndiPipeline is the Schema for the cyndipipelines API
-
-.Appears In:
-****
-- xref:{anchor_prefix}-github-com-redhatinsights-clowder-apis-cyndi-operator-v1alpha1-cyndipipelinelist[$$CyndiPipelineList$$]
-****
-
-[cols="25a,75a", options="header"]
-|===
-| Field | Description
-| *`apiVersion`* __string__ | `cyndi.cloud.redhat.com/v1alpha1`
-| *`kind`* __string__ | `CyndiPipeline`
-| *`metadata`* __link:https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.15/#objectmeta-v1-meta[$$ObjectMeta$$]__ | Refer to Kubernetes API documentation for fields of `metadata`.
-
-| *`spec`* __xref:{anchor_prefix}-github-com-redhatinsights-clowder-apis-cyndi-operator-v1alpha1-cyndipipelinespec[$$CyndiPipelineSpec$$]__ | 
-|===
-
-
-[id="{anchor_prefix}-github-com-redhatinsights-clowder-apis-cyndi-operator-v1alpha1-cyndipipelinelist"]
-==== CyndiPipelineList 
-
-CyndiPipelineList contains a list of CyndiPipeline
-
-
-
-[cols="25a,75a", options="header"]
-|===
-| Field | Description
-| *`apiVersion`* __string__ | `cyndi.cloud.redhat.com/v1alpha1`
-| *`kind`* __string__ | `CyndiPipelineList`
-| *`metadata`* __link:https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.15/#listmeta-v1-meta[$$ListMeta$$]__ | Refer to Kubernetes API documentation for fields of `metadata`.
-
-| *`items`* __xref:{anchor_prefix}-github-com-redhatinsights-clowder-apis-cyndi-operator-v1alpha1-cyndipipeline[$$CyndiPipeline$$]__ | 
-|===
-
-
-[id="{anchor_prefix}-github-com-redhatinsights-clowder-apis-cyndi-operator-v1alpha1-cyndipipelinespec"]
-==== CyndiPipelineSpec 
-
-CyndiPipelineSpec defines the desired state of CyndiPipeline
-
-.Appears In:
-****
-- xref:{anchor_prefix}-github-com-redhatinsights-clowder-apis-cyndi-operator-v1alpha1-cyndipipeline[$$CyndiPipeline$$]
-****
-
-[cols="25a,75a", options="header"]
-|===
-| Field | Description
-| *`appName`* __string__ | 
-| *`insightsOnly`* __boolean__ | 
-| *`connectCluster`* __string__ | 
-| *`maxAge`* __integer__ | 
-| *`validationThreshold`* __integer__ | 
-| *`topic`* __string__ | 
-| *`dbSecret`* __string__ | 
-| *`inventoryDbSecret`* __string__ | 
-|===
-
-
 
 
