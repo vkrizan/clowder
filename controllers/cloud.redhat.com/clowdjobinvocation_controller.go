@@ -29,15 +29,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/RedHatInsights/clowder/controllers/cloud.redhat.com/errors"
 	"github.com/RedHatInsights/clowder/controllers/cloud.redhat.com/providers/iqe"
 	jobProvider "github.com/RedHatInsights/clowder/controllers/cloud.redhat.com/providers/job"
 
 	"github.com/RedHatInsights/clowder/controllers/cloud.redhat.com/providers"
+	"github.com/RedHatInsights/clowder/controllers/cloud.redhat.com/utils"
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -82,133 +80,165 @@ func (r *ClowdJobInvocationReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	cache := providers.NewObjectCache(ctx, r.Client, r.Scheme)
 
-	// Set the initial status to an empty list of pods and a Completed
-	// status of false. If a job has been invoked, but hasn't finished,
-	// setting the status after requeue will ensure it won't be double invoked
-	if err := r.setCompletedStatus(ctx, &cji); err != nil {
-		return ctrl.Result{Requeue: true}, err
-	}
-	if err := r.Client.Status().Update(ctx, &cji); err != nil {
-		return ctrl.Result{Requeue: true}, err
+	// Deprecated, used to handle any lagging CJIs that would otherwise throw errors
+	if cji.Status.Jobs != nil {
+
+		// Warn, and set the CJI not to reconcile again. If you can see "jobs", the cji has been invoked previously
+		r.Log.Info("jobinvocation", cji.Name, "Warning: deprecated CJI status; please remove this CJI and reinvoke to reset the Completed status")
+		cji.Status.JobMap = map[string]crd.JobConditionState{}
+		if err := SetClowdJobInvocationConditions(ctx, r.Client, &cji, crd.ReconciliationSuccessful, nil); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
 	}
 
 	// If the status is updated to complete, don't invoke again.
 	if cji.Status.Completed {
+		r.Log.Info("Job has been completed", "jobinvocation", cji.Name)
 		r.Recorder.Eventf(&cji, "Normal", "ClowdJobInvocationComplete", "ClowdJobInvocation [%s] has completed all jobs", cji.Name)
+		if err := SetClowdJobInvocationConditions(ctx, r.Client, &cji, crd.ReconciliationSuccessful, nil); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
 	}
 
-	// We have already invoked jobs and don't need to announce another reconcile run
-	if len(cji.Status.Jobs) > 0 {
+	// CJI has already invoked a job, we'll update the status
+	if cji.Status.JobMap != nil {
+		if err := SetClowdJobInvocationConditions(ctx, r.Client, &cji, crd.ReconciliationSuccessful, nil); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
-	}
+	} else {
+		// This is a fresh CJI and needs to be invoked the first time
+		r.Log.Info("Reconciliation started", "ClowdJobInvocation", fmt.Sprintf("%s:%s", cji.Namespace, cji.Name))
+		ctx = context.WithValue(ctx, errors.ClowdKey("obj"), &cji)
 
-	r.Log.Info("Reconciliation started", "ClowdJobInvocation", fmt.Sprintf("%s:%s", cji.Namespace, cji.Name))
-	ctx = context.WithValue(ctx, errors.ClowdKey("obj"), &cji)
+		// Get the ClowdApp. Used to find definition of job being invoked
+		app := crd.ClowdApp{}
+		appErr := r.Client.Get(ctx, types.NamespacedName{
+			Name:      cji.Spec.AppName,
+			Namespace: req.Namespace,
+		}, &app)
 
-	// Get the ClowdApp. Used to find definition of job being invoked
-	app := crd.ClowdApp{}
-	appErr := r.Client.Get(ctx, types.NamespacedName{
-		Name:      cji.Spec.AppName,
-		Namespace: req.Namespace,
-	}, &app)
+		// Determine if the ClowdApp containing the Job exists
+		if appErr != nil {
+			r.Recorder.Eventf(&cji, "Warning", "ClowdAppMissing", "ClowdApp [%s] is missing; Job cannot be invoked", cji.Spec.AppName)
+			if err := SetClowdJobInvocationConditions(ctx, r.Client, &cji, crd.ReconciliationSuccessful, nil); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{Requeue: true}, appErr
+		}
 
-	// Determine if the ClowdApp containing the Job exists
-	if appErr != nil {
-		r.Recorder.Eventf(&cji, "Warning", "ClowdAppMissing", "ClowdApp [%s] is missing; Job cannot be invoked", cji.Spec.AppName)
-		return ctrl.Result{Requeue: true}, appErr
-	}
+		// Determine if the ClowdApp containing the Job is ready
+		if !app.IsReady() {
+			r.Recorder.Eventf(&app, "Warning", "ClowdAppNotReady", "ClowdApp [%s] is not ready", cji.Spec.AppName)
+			r.Log.Info("App not yet ready, requeue", "jobinvocation", cji.Spec.AppName, "namespace", app.Namespace)
+			if err := SetClowdJobInvocationConditions(ctx, r.Client, &cji, crd.ReconciliationSuccessful, nil); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{Requeue: true}, appErr
+		}
 
-	// Determine if the ClowdApp containing the Job is ready
-	if !app.IsReady() {
-		r.Recorder.Eventf(&app, "Warning", "ClowdAppNotReady", "ClowdApp [%s] is not ready", cji.Spec.AppName)
-		r.Log.Info("App not yet ready, requeue", "jobinvocation", cji.Spec.AppName, "namespace", app.Namespace)
-		return ctrl.Result{Requeue: true}, appErr
-	}
+		// Get the ClowdEnv for InvokeJob. Env is needed to build out our pod
+		// template for each job
+		env := crd.ClowdEnvironment{}
+		envErr := r.Client.Get(ctx, types.NamespacedName{
+			Name: app.Spec.EnvName,
+		}, &env)
 
-	// Get the ClowdEnv for InvokeJob. Env is needed to build out our pod
-	// template for each job
-	env := crd.ClowdEnvironment{}
-	envErr := r.Client.Get(ctx, types.NamespacedName{
-		Name: app.Spec.EnvName,
-	}, &env)
+		if envErr != nil {
+			r.Recorder.Eventf(&cji, "Warning", "ClowdEnvMissing", "ClowdEnv [%s] is missing; Job cannot be invoked", app.Spec.EnvName)
+			if err := SetClowdJobInvocationConditions(ctx, r.Client, &cji, crd.ReconciliationSuccessful, nil); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{Requeue: true}, envErr
+		}
 
-	if envErr != nil {
-		r.Recorder.Eventf(&cji, "Warning", "ClowdEnvMissing", "ClowdEnv [%s] is missing; Job cannot be invoked", app.Spec.EnvName)
-		return ctrl.Result{Requeue: true}, envErr
-	}
+		// Walk the job names to be invoked and match in the ClowdApp Spec
+		for _, jobName := range cji.Spec.Jobs {
+			// Match the crd.Job name to the JobTemplate in ClowdApp
+			job, err := getJobFromName(jobName, &app)
+			if err != nil {
+				r.Recorder.Eventf(&app, "Warning", "JobNameMissing", "ClowdApp [%s] has no job named", jobName)
+				r.Log.Info("Missing Job Definition", "jobinvocation", cji.Spec.AppName, "namespace", app.Namespace)
+				if err := SetClowdJobInvocationConditions(ctx, r.Client, &cji, crd.ReconciliationSuccessful, nil); err != nil {
+					return ctrl.Result{}, err
+				}
+				return ctrl.Result{}, err
+			}
+			job.Name = fmt.Sprintf("%s-%s", app.Name, jobName)
 
-	// Walk the job names to be invoked and match in the ClowdApp Spec
-	for _, jobName := range cji.Spec.Jobs {
-		// Match the crd.Job name to the JobTemplate in ClowdApp
-		job, err := getJobFromName(jobName, &app)
-		if err != nil {
-			r.Recorder.Eventf(&app, "Warning", "JobNameMissing", "ClowdApp [%s] has no job named", jobName)
-			r.Log.Info("Missing Job Definition", "jobinvocation", cji.Spec.AppName, "namespace", app.Namespace)
+			// We have a match that isn't running and can invoke the job
+			r.Log.Info("Invoking job", "jobinvocation", job.Name, "namespace", app.Namespace)
+
+			if err := r.InvokeJob(ctx, &cache, &job, &app, &env, &cji); err != nil {
+				r.Log.Error(err, "Job Invocation Failed", "jobinvocation", jobName, "namespace", app.Namespace)
+				if err := SetClowdJobInvocationConditions(ctx, r.Client, &cji, crd.ReconciliationSuccessful, nil); err != nil {
+					return ctrl.Result{}, err
+				}
+				r.Recorder.Eventf(&cji, "Warning", "JobNotInvoked", "Job [%s] could not be invoked", jobName)
+				return ctrl.Result{Requeue: true}, err
+			}
+		}
+
+		// Check IQE struct to see if we need to invoke an IQE Job
+		// In the future, we'll need to handle other types, but this will suffice since testing only has iqe.
+		var emptyTesting crd.IqeJobSpec
+		if cji.Spec.Testing.Iqe != emptyTesting {
+
+			nn := types.NamespacedName{
+				Name:      cji.GenerateJobName(),
+				Namespace: cji.Namespace,
+			}
+
+			j := batchv1.Job{}
+			if err := cache.Create(IqeClowdJob, nn, &j); err != nil {
+				r.Log.Error(err, "Iqe Job could not be created via cache", "jobinvocation", nn.Name)
+				if err := SetClowdJobInvocationConditions(ctx, r.Client, &cji, crd.ReconciliationSuccessful, nil); err != nil {
+					return ctrl.Result{}, err
+				}
+				return ctrl.Result{}, err
+			}
+
+			if err := iqe.CreateIqeJobResource(&cache, &cji, &env, &app, nn, ctx, &j, r.Log, r.Client); err != nil {
+				r.Log.Error(err, "Iqe Job creation encountered an error", "jobinvocation", nn.Name)
+				r.Recorder.Eventf(&cji, "Warning", "IQEJobFailure", "Job [%s] failed to invoke", j.ObjectMeta.Name)
+				if err := SetClowdJobInvocationConditions(ctx, r.Client, &cji, crd.ReconciliationSuccessful, nil); err != nil {
+					return ctrl.Result{}, err
+				}
+				return ctrl.Result{}, err
+			}
+
+			if err := cache.Update(IqeClowdJob, &j); err != nil {
+				r.Log.Error(err, "Iqe Job could not update via cache", "jobinvocation", nn.Name)
+				if err := SetClowdJobInvocationConditions(ctx, r.Client, &cji, crd.ReconciliationSuccessful, nil); err != nil {
+					return ctrl.Result{}, err
+				}
+				return ctrl.Result{}, err
+
+			}
+			r.Log.Info("Iqe Job Invoked Successfully", "jobinvocation", nn.Name, "namespace", app.Namespace)
+			if cji.Status.JobMap != nil {
+				cji.Status.JobMap[nn.Name] = crd.JobInvoked
+			} else {
+				cji.Status.JobMap = map[string]crd.JobConditionState{nn.Name: crd.JobInvoked}
+			}
+
+			r.Recorder.Eventf(&cji, "Normal", "IQEJobInvoked", "Job [%s] was invoked successfully", j.ObjectMeta.Name)
+		}
+
+		if cacheErr := cache.ApplyAll(); cacheErr != nil {
+			if err := SetClowdJobInvocationConditions(ctx, r.Client, &cji, crd.ReconciliationSuccessful, nil); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, cacheErr
+		}
+
+		// Short running jobs may be done by the time the loop is ranged,
+		// so we update again before the reconcile ends
+		if err := SetClowdJobInvocationConditions(ctx, r.Client, &cji, crd.ReconciliationSuccessful, nil); err != nil {
 			return ctrl.Result{}, err
 		}
-
-		// becuase a CJI can contain > 1 job, we must handle the case
-		// where one job is done and the other is still running
-		fullJobName := fmt.Sprintf("%v-%v-%v", app.Name, job.Name, cji.Name)
-		if contains(cji.Status.Jobs, fullJobName) {
-			continue
-		}
-
-		// We have a match that isn't running and can invoke the job
-		r.Log.Info("Invoking job", "jobinvocation", jobName, "namespace", app.Namespace)
-
-		if err := r.InvokeJob(&cache, &job, &app, &env, &cji); err != nil {
-			r.Log.Error(err, "Job Invocation Failed", "jobinvocation", jobName, "namespace", app.Namespace)
-			r.Recorder.Eventf(&cji, "Warning", "JobNotInvoked", "Job [%s] could not be invoked", jobName)
-			return ctrl.Result{Requeue: true}, err
-		}
-	}
-
-	// Check IQE struct to see if we need to invoke an IQE Job
-	// In the future, we'll need to handle other types, but this will suffice since testing only has iqe.
-	var emptyTesting crd.IqeJobSpec
-	if cji.Spec.Testing.Iqe != emptyTesting {
-
-		nn := types.NamespacedName{
-			Name:      fmt.Sprintf("%s-iqe", cji.Name),
-			Namespace: cji.Namespace,
-		}
-
-		j := batchv1.Job{}
-		if err := cache.Create(IqeClowdJob, nn, &j); err != nil {
-			r.Log.Error(err, "Iqe Job could not be created via cache", "jobinvocation", nn.Name)
-			return ctrl.Result{}, err
-		}
-
-		if err := iqe.CreateIqeJobResource(&cache, &cji, &env, &app, nn, ctx, &j, r.Log, r.Client); err != nil {
-			r.Log.Error(err, "Iqe Job creation encountered an error", "jobinvocation", nn.Name)
-			r.Recorder.Eventf(&cji, "Warning", "IQEJobFailure", "Job [%s] failed to invoke", j.ObjectMeta.Name)
-			return ctrl.Result{}, err
-		}
-
-		if err := cache.Update(IqeClowdJob, &j); err != nil {
-			r.Log.Error(err, "Iqe Job could not update via cache", "jobinvocation", nn.Name)
-			return ctrl.Result{}, err
-
-		}
-		cji.Status.Jobs = append(cji.Status.Jobs, j.ObjectMeta.Name)
-		r.Log.Info("Iqe Job Invoked Successfully", "jobinvocation", nn.Name, "namespace", app.Namespace)
-		r.Recorder.Eventf(&cji, "Normal", "IQEJobInvoked", "Job [%s] was invoked successfully", j.ObjectMeta.Name)
-	}
-
-	if cacheErr := cache.ApplyAll(); cacheErr != nil {
-		return ctrl.Result{}, cacheErr
-	}
-
-	// Short running jobs may be done by the time the loop is ranged,
-	// so we update again before the reconcile ends
-	if statusErr := r.setCompletedStatus(ctx, &cji); statusErr != nil {
-		return ctrl.Result{Requeue: true}, statusErr
-	}
-
-	if updateErr := r.Client.Status().Update(ctx, &cji); updateErr != nil {
-		return ctrl.Result{}, updateErr
 	}
 
 	return ctrl.Result{}, nil
@@ -216,9 +246,11 @@ func (r *ClowdJobInvocationReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 // InvokeJob is responsible for applying the Job. It also updates and reports
 // the status of that job
-func (r *ClowdJobInvocationReconciler) InvokeJob(cache *providers.ObjectCache, job *crd.Job, app *crd.ClowdApp, env *crd.ClowdEnvironment, cji *crd.ClowdJobInvocation) error {
+func (r *ClowdJobInvocationReconciler) InvokeJob(ctx context.Context, cache *providers.ObjectCache, job *crd.Job, app *crd.ClowdApp, env *crd.ClowdEnvironment, cji *crd.ClowdJobInvocation) error {
+	// Update job name to avoid collisions
+	randomString := utils.RandStringLower(7)
 	nn := types.NamespacedName{
-		Name:      fmt.Sprintf("%v-%v-%v", app.Name, job.Name, cji.Name),
+		Name:      fmt.Sprintf("%s-%s", job.Name, randomString),
 		Namespace: cji.Namespace,
 	}
 
@@ -233,8 +265,12 @@ func (r *ClowdJobInvocationReconciler) InvokeJob(cache *providers.ObjectCache, j
 		return err
 	}
 
-	cji.Status.Jobs = append(cji.Status.Jobs, j.ObjectMeta.Name)
 	r.Log.Info("Job Invoked Successfully", "jobinvocation", job.Name, "namespace", app.Namespace)
+	if cji.Status.JobMap != nil {
+		cji.Status.JobMap[j.ObjectMeta.Name] = crd.JobInvoked
+	} else {
+		cji.Status.JobMap = map[string]crd.JobConditionState{j.ObjectMeta.Name: crd.JobInvoked}
+	}
 	r.Recorder.Eventf(cji, "Normal", "ClowdJobInvoked", "Job [%s] was invoked successfully", j.ObjectMeta.Name)
 
 	return nil
@@ -255,94 +291,43 @@ func (r *ClowdJobInvocationReconciler) SetupWithManager(mgr ctrl.Manager) error 
 	r.Recorder = mgr.GetEventRecorderFor("clowdjobinvocation")
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&crd.ClowdJobInvocation{}).
-		Watches(
-			&source.Kind{Type: &batchv1.Job{}},
-			handler.EnqueueRequestsFromMapFunc(r.cjiToEnqueueUponJobUpdate),
-		).
 		Owns(&batchv1.Job{}).
 		Complete(r)
 }
 
-// cjiToEnqueueUponJobUpdate watches is triggered when a job watched by the
-// ClowdJobInvocationReconciler is updated. Rather than constantly requeue
-// in order to update a cji status, we can trigger a queue up a single reconcile
-// when a watched job updates
-func (r *ClowdJobInvocationReconciler) cjiToEnqueueUponJobUpdate(a client.Object) []reconcile.Request {
-	reqs := []reconcile.Request{}
-	ctx := context.Background()
-	obj := types.NamespacedName{
-		Name:      a.GetName(),
-		Namespace: a.GetNamespace(),
-	}
+func UpdateInvokedJobStatus(ctx context.Context, jobs *batchv1.JobList, cji *crd.ClowdJobInvocation) error {
 
-	job := batchv1.Job{}
-	if cjErr := r.Client.Get(ctx, obj, &job); cjErr != nil {
-		if k8serr.IsNotFound(cjErr) {
-			// Must have been deleted
-			return reqs
-		}
-		r.Log.Error(cjErr, "Failed to fetch ClowdJob")
-		return nil
-	}
+	for j := range cji.Status.JobMap {
+		for _, s := range jobs.Items {
+			jobName := s.ObjectMeta.Name
+			if j == jobName {
+				if len(s.Status.Conditions) > 0 {
+					condition := s.Status.Conditions[0].Type
+					switch condition {
+					case "Complete":
+						cji.Status.JobMap[jobName] = crd.JobComplete
+					case "Failed":
+						cji.Status.JobMap[jobName] = crd.JobFailed
+					default:
+						cji.Status.JobMap[jobName] = crd.JobInvoked
 
-	cjiList := crd.ClowdJobInvocationList{}
-	if cjiErr := r.Client.List(ctx, &cjiList); cjiErr != nil {
-		if k8serr.IsNotFound(cjiErr) {
-			// Must have been deleted
-			return reqs
-		}
-		r.Log.Error(cjiErr, "Failed to fetch ClowdJobInvocation")
-		return nil
-	}
-
-	for _, cji := range cjiList.Items {
-		// job event triggered a reconcile, check our jobs and match
-		// to enable a requeue
-		if contains(cji.Status.Jobs, job.ObjectMeta.Name) {
-			reqs = append(reqs, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      cji.Name,
-					Namespace: cji.Namespace,
-				},
-			})
+					}
+				}
+			}
 		}
 	}
-
-	return reqs
-}
-
-// Look for completed instead of successes
-// setCompletedStatus will determine if a CJI has completed all needed Jobs
-func (r *ClowdJobInvocationReconciler) setCompletedStatus(ctx context.Context, cji *crd.ClowdJobInvocation) error {
-
-	jobs := batchv1.JobList{}
-	if err := r.Client.List(ctx, &jobs, client.InNamespace(cji.ObjectMeta.Namespace)); err != nil {
-		return err
-	}
-
-	cji.Status.Completed = getInvocationStatus(&jobs, cji)
-
 	return nil
 }
 
-func getInvocationStatus(jobs *batchv1.JobList, cji *crd.ClowdJobInvocation) bool {
+func GetJobsStatus(jobs *batchv1.JobList, cji *crd.ClowdJobInvocation) bool {
 
-	// if there are no jobs run yet, initalize to []string instead of nil
-	if len(cji.Status.Jobs) == 0 {
-		cji.Status.Jobs = []string{}
-		return false
+	jobsRequired := len(cji.Spec.Jobs)
+	var emptyTesting crd.IqeJobSpec
+	if cji.Spec.Testing.Iqe != emptyTesting {
+		jobsRequired += 1
 	}
-
-	var completed bool
 	jobsCompleted := countCompletedJobs(jobs, cji)
-	// If calling jobs, we aren't complete until every job has completed
-	if invokedJobs := len(cji.Spec.Jobs); invokedJobs > 0 {
-		completed = jobsCompleted == invokedJobs
-	} else {
-		// only one iqe job will ever be invoked at a time, so it's one and done
-		completed = jobsCompleted > 0
-	}
-	return completed
+	return jobsCompleted == jobsRequired
 }
 
 func countCompletedJobs(jobs *batchv1.JobList, cji *crd.ClowdJobInvocation) int {
@@ -353,13 +338,17 @@ func countCompletedJobs(jobs *batchv1.JobList, cji *crd.ClowdJobInvocation) int 
 	// backoffLimit threshold. The Condition status is only populated when
 	// the jobs have succeeded or passed the backoff limit
 	for _, j := range jobs.Items {
-		if contains(cji.Status.Jobs, j.ObjectMeta.Name) {
-			if len(j.Status.Conditions) > 0 {
-				condition := j.Status.Conditions[0].Type
-				if condition == "Complete" || condition == "Failed" {
-					jobsCompleted++
+		for s := range cji.Status.JobMap {
+			if s == j.ObjectMeta.Name {
+				if len(j.Status.Conditions) > 0 {
+					//
+					condition := j.Status.Conditions[0].Type
+					if condition == "Complete" || condition == "Failed" {
+						jobsCompleted++
+					}
 				}
 			}
+
 		}
 	}
 	return jobsCompleted

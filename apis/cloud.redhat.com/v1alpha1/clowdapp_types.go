@@ -116,6 +116,12 @@ type PublicWebService struct {
 	// Enabled describes if Clowder should enable the public service and provide the
 	// configuration in the cdappconfig.
 	Enabled bool `json:"enabled,omitempty"`
+
+	// ApiPath describes the api path that will be configured to serve this backend from.
+	ApiPath string `json:"apiPath,omitempty"`
+
+	// WhitelistPaths define the paths that do not require authentication
+	WhitelistPaths []string `json:"whitelistPaths,omitempty"`
 }
 
 // PrivateWebService is the definition of the private web service. There can be only
@@ -341,6 +347,8 @@ const (
 	ReconciliationPartiallySuccessful ClowdConditionType = "ReconciliationPartiallySuccessful"
 	// ReconciliationFailed means the reconciliation failed
 	ReconciliationFailed ClowdConditionType = "ReconciliationFailed"
+	// JobInvocationComplete means all the Jobs have finished
+	JobInvocationComplete ClowdConditionType = "JobInvocationComplete"
 )
 
 type ClowdCondition struct {
@@ -362,9 +370,14 @@ type ClowdAppStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 	// ClowdEnvironmentStatus defines the observed state of ClowdEnvironment
-	Deployments common.DeploymentStatus `json:"deployments,omitempty"`
-	Ready       bool                    `json:"ready"`
-	Conditions  []ClowdCondition        `json:"conditions,omitempty"`
+	Deployments AppResourceStatus `json:"deployments,omitempty"`
+	Ready       bool              `json:"ready"`
+	Conditions  []ClowdCondition  `json:"conditions,omitempty"`
+}
+
+type AppResourceStatus struct {
+	ManagedDeployments int32 `json:"managedDeployments"`
+	ReadyDeployments   int32 `json:"readyDeployments"`
 }
 
 // +kubebuilder:object:root=true
@@ -464,7 +477,7 @@ func (i *ClowdApp) GetUID() types.UID {
 }
 
 // GetDeploymentStatus returns the Status.Deployments member
-func (i *ClowdApp) GetDeploymentStatus() *common.DeploymentStatus {
+func (i *ClowdApp) GetDeploymentStatus() *AppResourceStatus {
 	return &i.Status.Deployments
 }
 

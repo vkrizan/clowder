@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	crd "github.com/RedHatInsights/clowder/apis/cloud.redhat.com/v1alpha1"
 	"github.com/RedHatInsights/clowder/apis/cloud.redhat.com/v1alpha1/common"
@@ -25,12 +26,26 @@ import (
 var IqeSecret = providers.NewSingleResourceIdent("cji", "iqe_secret", &core.Secret{})
 var VaultSecret = providers.NewSingleResourceIdent("cji", "vault_secret", &core.Secret{})
 
+func joinNullableSlice(s *[]string) string {
+	if s != nil {
+		return strings.Join(*s, ",")
+	}
+	return ""
+}
+
 // CreateIqeJobResource will create a Job that contains a pod spec for running IQE
 func CreateIqeJobResource(cache *providers.ObjectCache, cji *crd.ClowdJobInvocation, env *crd.ClowdEnvironment, app *crd.ClowdApp, nn types.NamespacedName, ctx context.Context, j *batchv1.Job, logger logr.Logger, client client.Client) error {
 	labels := cji.GetLabels()
 	cji.SetObjectMeta(j, crd.Name(nn.Name), crd.Labels(labels))
 
+	// Becuase the ns name now has a suffix attached, we need to specify
+	// that the secret name does not include it (and can't because the
+	// env creates the secret)
+	secretName := cji.GetIQEName()
+
 	j.ObjectMeta.Labels = labels
+	j.ObjectMeta.Labels["job"] = secretName
+	j.Name = nn.Name
 	j.Spec.Template.ObjectMeta.Labels = labels
 
 	j.Spec.Template.Spec.RestartPolicy = core.RestartPolicyNever
@@ -50,6 +65,9 @@ func CreateIqeJobResource(cache *providers.ObjectCache, cji *crd.ClowdJobInvocat
 		{Name: "IQE_PLUGINS", Value: app.Spec.Testing.IqePlugin},
 		{Name: "IQE_MARKER_EXPRESSION", Value: cji.Spec.Testing.Iqe.Marker},
 		{Name: "IQE_FILTER_EXPRESSION", Value: cji.Spec.Testing.Iqe.Filter},
+		{Name: "IQE_REQUIREMENTS", Value: joinNullableSlice(cji.Spec.Testing.Iqe.Requirements)},
+		{Name: "IQE_REQUIREMENTS_PRIORITY", Value: joinNullableSlice(cji.Spec.Testing.Iqe.RequirementsPriority)},
+		{Name: "IQE_TEST_IMPORTANCE", Value: joinNullableSlice(cji.Spec.Testing.Iqe.TestImportance)},
 	}
 
 	// apply vault env vars if vaultSecretRef exists in environment
@@ -84,7 +102,7 @@ func CreateIqeJobResource(cache *providers.ObjectCache, cji *crd.ClowdJobInvocat
 
 	// create pod container
 	c := core.Container{
-		Name:         nn.Name,
+		Name:         j.Name,
 		Image:        fmt.Sprintf("%s:%s", iqeImage, tag),
 		Env:          envVars,
 		Resources:    deployProvider.ProcessResources(&pod, env),
@@ -114,7 +132,7 @@ func CreateIqeJobResource(cache *providers.ObjectCache, cji *crd.ClowdJobInvocat
 			Name: "cdenvconfig",
 			VolumeSource: core.VolumeSource{
 				Secret: &core.SecretVolumeSource{
-					SecretName: nn.Name,
+					SecretName: secretName,
 				},
 			},
 		})
@@ -234,6 +252,7 @@ func addVaultSecretToCache(cache *providers.ObjectCache, ctx context.Context, cj
 
 func addIqeSecretToCache(cache *providers.ObjectCache, ctx context.Context, cji *crd.ClowdJobInvocation, app *crd.ClowdApp, envName string, logger logr.Logger, client client.Client) error {
 	iqeSecret := &core.Secret{}
+	secretName := fmt.Sprintf("%s-iqe", cji.Name)
 
 	appList := crd.ClowdAppList{}
 	if err := crd.GetAppInSameEnv(ctx, client, app, &appList); err != nil {
@@ -249,7 +268,7 @@ func addIqeSecretToCache(cache *providers.ObjectCache, ctx context.Context, cji 
 		logger.Error(err, "Failed to check for iqe secret")
 		return err
 	}
-	iqeSecret.SetName(nn.Name)
+	iqeSecret.SetName(secretName)
 	iqeSecret.SetNamespace(nn.Namespace)
 
 	// This should maybe be owned by the job

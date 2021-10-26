@@ -90,6 +90,10 @@ api-docs:
 	./build/build_api_docs.sh
 	./build/build_config_docs.sh
 
+build-template: manifests kustomize controller-gen
+	$(KUSTOMIZE) build config/deployment-template | ./manifest2template.py --mutate > deploy-mutate.yml
+	$(KUSTOMIZE) build config/deployment-template | ./manifest2template.py > deploy.yml
+
 release: manifests kustomize controller-gen
 	echo "---" > manifest.yaml
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}

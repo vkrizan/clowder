@@ -23,15 +23,18 @@ import (
 	"github.com/RedHatInsights/clowder/controllers/cloud.redhat.com/errors"
 	"github.com/RedHatInsights/clowder/controllers/cloud.redhat.com/utils"
 	strimzi "github.com/RedHatInsights/strimzi-client-go/apis/kafka.strimzi.io/v1beta2"
+	"github.com/go-logr/logr"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // WebMode details the mode of operation of the Clowder Web Provider
-// +kubebuilder:validation:Enum=none;operator
+// +kubebuilder:validation:Enum=none;operator;local
 type WebMode string
 
 // WebConfig configures the Clowder provider controlling the creation of web
@@ -43,14 +46,22 @@ type WebConfig struct {
 	// The private port that web services inside a ClowdApp should be served on.
 	PrivatePort int32 `json:"privatePort,omitempty"`
 
+	// The auth port that the web local mode will use with the AuthSidecar
+	AuthPort int32 `json:"aiuthPort,omitempty"`
+
 	// An api prefix path that pods will be instructed to use when setting up
 	// their web server.
 	ApiPrefix string `json:"apiPrefix,omitempty"`
 
 	// The mode of operation of the Web provider. The allowed modes are
-	// (*_none_*), which disables web service generation, or (*_operator_*)
-	// where services and probes are generated.
+	// (*_none_*/*_operator_*), and (*_local_*) which deploys keycloak and BOP.
 	Mode WebMode `json:"mode"`
+
+	// The URL of BOP - only used in (*_none_*/*_operator_*) mode.
+	BOPURL string `json:"bopURL,omitempty"`
+
+	// Ingress Class Name used only in (*_local_*) mode.
+	IngressClass string `json:"ingressClass,omitempty"`
 }
 
 // MetricsMode details the mode of operation of the Clowder Metrics Provider
@@ -436,12 +447,20 @@ type MinioStatus struct {
 type ClowdEnvironmentStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
-	Conditions      []ClowdCondition        `json:"conditions,omitempty"`
-	TargetNamespace string                  `json:"targetNamespace,omitempty"`
-	Ready           bool                    `json:"ready,omitempty"`
-	Deployments     common.DeploymentStatus `json:"deployments,omitempty"`
-	Apps            []AppInfo               `json:"apps,omitempty"`
-	Generation      int64                   `json:"generation,omitempty"`
+	Conditions      []ClowdCondition  `json:"conditions,omitempty"`
+	TargetNamespace string            `json:"targetNamespace,omitempty"`
+	Ready           bool              `json:"ready,omitempty"`
+	Deployments     EnvResourceStatus `json:"deployments,omitempty"`
+	Apps            []AppInfo         `json:"apps,omitempty"`
+	Generation      int64             `json:"generation,omitempty"`
+	Hostname        string            `json:"hostname,omitempty"`
+}
+
+type EnvResourceStatus struct {
+	ManagedDeployments int32 `json:"managedDeployments"`
+	ReadyDeployments   int32 `json:"readyDeployments"`
+	ManagedTopics      int32 `json:"managedTopics"`
+	ReadyTopics        int32 `json:"readyTopics"`
 }
 
 // AppInfo details information about a specific app.
@@ -535,7 +554,7 @@ func (i *ClowdEnvironment) GetUID() types.UID {
 }
 
 // GetDeploymentStatus returns the Status.Deployments member
-func (i *ClowdEnvironment) GetDeploymentStatus() *common.DeploymentStatus {
+func (i *ClowdEnvironment) GetDeploymentStatus() *EnvResourceStatus {
 	return &i.Status.Deployments
 }
 
@@ -610,4 +629,41 @@ func (i *ClowdEnvironment) GetNamespacesInEnv(ctx context.Context, pClient clien
 // IsNodePort indicates whether or not services are configured as NodePort or not
 func (i *ClowdEnvironment) IsNodePort() bool {
 	return i.Spec.ServiceConfig.Type == "NodePort"
+}
+
+// GetClowdHostname gets the hostname for a particular environment
+func (i *ClowdEnvironment) GenerateHostname(ctx context.Context, pClient client.Client, log logr.Logger) string {
+	nn := types.NamespacedName{
+		Name: "cluster",
+	}
+
+	var icGVK = schema.GroupVersionKind{
+		Group:   "config.openshift.io",
+		Kind:    "Ingress",
+		Version: "v1",
+	}
+
+	ic := &unstructured.Unstructured{}
+	ic.SetGroupVersionKind(icGVK)
+
+	err := pClient.Get(ctx, nn, ic)
+	if err != nil {
+		log.Info("Couldn't find cluster route resource, defaulting to env name" + err.Error())
+		return i.Name
+	}
+
+	randomIdent := strings.ToLower(utils.RandString(8))
+
+	obj := ic.Object
+	if obj["spec"] != nil {
+		spec := obj["spec"].(map[string]interface{})
+		domain := spec["domain"]
+		if domain != "" {
+			return fmt.Sprintf("%s-%s.%s", i.Name, randomIdent, domain)
+		}
+	}
+
+	log.Info("Route resource didn't contain spec.domain, defaulting to env name")
+
+	return i.Name
 }

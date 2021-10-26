@@ -543,18 +543,30 @@ spec:
                   web:
                     description: Defines the Configuration for the Clowder Web Provider.
                     properties:
+                      aiuthPort:
+                        description: The auth port that the web local mode will use
+                          with the AuthSidecar
+                        format: int32
+                        type: integer
                       apiPrefix:
                         description: An api prefix path that pods will be instructed
                           to use when setting up their web server.
                         type: string
+                      bopURL:
+                        description: The URL of BOP - only used in (*_none_*/*_operator_*)
+                          mode.
+                        type: string
+                      ingressClass:
+                        description: Ingress Class Name used only in (*_local_*) mode.
+                        type: string
                       mode:
                         description: The mode of operation of the Web provider. The
-                          allowed modes are (*_none_*), which disables web service
-                          generation, or (*_operator_*) where services and probes
-                          are generated.
+                          allowed modes are (*_none_*/*_operator_*), and (*_local_*)
+                          which deploys keycloak and BOP.
                         enum:
                         - none
                         - operator
+                        - local
                         type: string
                       port:
                         description: The port that web services inside ClowdApp pods
@@ -687,22 +699,30 @@ spec:
                   type: object
                 type: array
               deployments:
-                description: DeploymentStatus defines Overall and ready deployment
-                  counts
                 properties:
                   managedDeployments:
+                    format: int32
+                    type: integer
+                  managedTopics:
                     format: int32
                     type: integer
                   readyDeployments:
                     format: int32
                     type: integer
+                  readyTopics:
+                    format: int32
+                    type: integer
                 required:
                 - managedDeployments
+                - managedTopics
                 - readyDeployments
+                - readyTopics
                 type: object
               generation:
                 format: int64
                 type: integer
+              hostname:
+                type: string
               ready:
                 type: boolean
               targetNamespace:

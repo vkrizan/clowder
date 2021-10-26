@@ -19,9 +19,23 @@ package v1alpha1
 import (
 	"fmt"
 
+	"context"
+
+	batchv1 "k8s.io/api/batch/v1"
+
 	"github.com/RedHatInsights/clowder/apis/cloud.redhat.com/v1alpha1/common"
+	"github.com/RedHatInsights/clowder/controllers/cloud.redhat.com/utils"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+type JobConditionState string
+
+const (
+	JobInvoked  JobConditionState = "Invoked"
+	JobComplete JobConditionState = "Complete"
+	JobFailed   JobConditionState = "Failed"
 )
 
 type JobTestingSpec struct {
@@ -34,17 +48,31 @@ type IqeJobSpec struct {
 	// By default, Clowder will set the image on the ClowdJob to be the
 	// baseImage:name-of-iqe-plugin, but only the tag can be overridden here
 	ImageTag string `json:"imageTag,omitempty"`
+
 	// Indiciates the presence of a selenium container
 	// Note: currently not implemented
 	UI UiSpec `json:"ui,omitempty"`
+
 	// sets the pytest -m args
 	Marker string `json:"marker,omitempty"`
+
 	// sets value for ENV_FOR_DYNACONF
 	DynaconfEnvName string `json:"dynaconfEnvName"`
+
 	// sets pytest -k args
 	Filter string `json:"filter,omitempty"`
+
 	// used when desiring to run `oc debug`on the Job to cause pod to immediately & gracefully exit
 	Debug bool `json:"debug,omitempty"`
+
+	// sets values passed to IQE '--requirements' arg
+	Requirements *[]string `json:"requirements,omitempty"`
+
+	// sets values passed to IQE '--requirements-priority' arg
+	RequirementsPriority *[]string `json:"requirementsPriority,omitempty"`
+
+	// sets values passed to IQE '--test-importance' arg
+	TestImportance *[]string `json:"testImportance,omitempty"`
 }
 
 type UiSpec struct {
@@ -69,8 +97,11 @@ type ClowdJobInvocationStatus struct {
 	// Completed is false and updated when all jobs have either finished
 	// successfully or failed past their backoff and retry values
 	Completed bool `json:"completed"`
-	// Jobs is a list of the job names run by Job invocation
-	Jobs []string `json:"jobs"`
+	// DEPRECATED : Jobs is an array of jobs name run by a CJI.
+	Jobs []string `json:"jobs,omitempty"`
+	// JobMap is a map of the job names run by Job invocation and their outcomes
+	JobMap     map[string]JobConditionState `json:"jobMap"`
+	Conditions []ClowdCondition             `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -153,6 +184,11 @@ func (i *ClowdJobInvocation) GetClowdSAName() string {
 	return fmt.Sprintf("%s-cji", i.Name)
 }
 
+// GetIQEName returns the name of the ClowdJobInvocation's IQE job.
+func (i *ClowdJobInvocation) GetIQEName() string {
+	return fmt.Sprintf("%s-iqe", i.Name)
+}
+
 // GetUID returns ObjectMeta.UID
 func (i *ClowdJobInvocation) GetUID() types.UID {
 	return i.ObjectMeta.UID
@@ -168,4 +204,19 @@ func (i *ClowdJobInvocation) SetObjectMeta(o metav1.Object, opts ...omfunc) {
 	for _, opt := range opts {
 		opt(o)
 	}
+}
+
+func (i *ClowdJobInvocation) GetInvokedJobs(ctx context.Context, c client.Client) (*batchv1.JobList, error) {
+
+	jobs := batchv1.JobList{}
+	if err := c.List(ctx, &jobs, client.InNamespace(i.ObjectMeta.Namespace)); err != nil {
+		return nil, err
+	}
+
+	return &jobs, nil
+}
+
+func (i *ClowdJobInvocation) GenerateJobName() string {
+	randomString := utils.RandStringLower(7)
+	return fmt.Sprintf("%s-iqe-%s", i.Name, randomString)
 }

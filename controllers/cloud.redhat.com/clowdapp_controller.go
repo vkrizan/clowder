@@ -100,6 +100,7 @@ type ClowdAppReconciler struct {
 // +kubebuilder:rbac:groups=kafka.strimzi.io,resources=kafkaconnectors,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=endpoints;pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses;networkpolicies,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=config.openshift.io,resources=ingresses,verbs=get;list
 
 // Reconcile fn
 func (r *ClowdAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -167,17 +168,15 @@ func (r *ClowdAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	if env.Generation != env.Status.Generation {
-		err := errors.New(fmt.Sprintf("Clowd Environment not yet reconciled: %s", env.Name))
-		SetClowdAppConditions(ctx, r.Client, &app, crd.ReconciliationFailed, err)
-		return ctrl.Result{Requeue: true}, errors.New(fmt.Sprintf("Clowd Environment not yet reconciled: %s", env.Name))
+		r.Recorder.Eventf(&app, "Warning", "ClowdEnvNotReconciled", "Clowder Environment [%s] is not reconciled", app.Spec.EnvName)
+		log.Info("Env not yet reconciled", "app", app.Name, "namespace", app.Namespace)
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 10}, nil
 	}
 
 	if !env.IsReady() {
-		err := errors.New(fmt.Sprintf("Clowd Environment not ready: %s", env.Name))
-		SetClowdAppConditions(ctx, r.Client, &app, crd.ReconciliationFailed, err)
 		r.Recorder.Eventf(&app, "Warning", "ClowdEnvNotReady", "Clowder Environment [%s] is not ready", app.Spec.EnvName)
 		log.Info("Env not yet ready", "app", app.Name, "namespace", app.Namespace)
-		return ctrl.Result{Requeue: true}, errors.New(fmt.Sprintf("Clowd Environment not ready: %s", env.Name))
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 10}, nil
 	}
 
 	cache := providers.NewObjectCache(ctx, r.Client, scheme)
@@ -187,6 +186,7 @@ func (r *ClowdAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		Ctx:    ctx,
 		Env:    &env,
 		Cache:  &cache,
+		Log:    log,
 	}
 
 	var requeue = false
@@ -213,7 +213,7 @@ func (r *ClowdAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	if statusErr := SetDeploymentStatus(ctx, r.Client, &app); statusErr != nil {
+	if statusErr := SetAppResourceStatus(ctx, r.Client, &app); statusErr != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -244,7 +244,6 @@ func (r *ClowdAppReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			managedApps[app.GetIdent()] = true
 		}
 		managedAppsMetric.Set(float64(len(managedApps)))
-		log.Info("Metric contents", "apps", managedApps)
 	}
 
 	return ctrl.Result{Requeue: requeue}, nil
@@ -255,11 +254,15 @@ func isOurs(meta metav1.Object, gvk schema.GroupVersionKind) bool {
 		return true
 	} else if gvk.Kind == "ClowdApp" {
 		return true
+	} else if gvk.Kind == "ClowdJobInvocation" {
+		return true
 	} else if len(meta.GetOwnerReferences()) == 0 {
 		return false
 	} else if meta.GetOwnerReferences()[0].Kind == "ClowdApp" {
 		return true
 	} else if meta.GetOwnerReferences()[0].Kind == "ClowdEnvironment" {
+		return true
+	} else if meta.GetOwnerReferences()[0].Kind == "ClowdJobInvocation" {
 		return true
 	}
 	return false
@@ -463,6 +466,8 @@ func updateMetadata(app *crd.ClowdApp, appConfig *config.AppConfig) {
 	}
 
 	appConfig.Metadata = &metadata
+
+	appConfig.Metadata.Name = &app.Name
 }
 
 func (r *ClowdAppReconciler) runProviders(log logr.Logger, provider *providers.Provider, a *crd.ClowdApp) error {

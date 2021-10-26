@@ -41,6 +41,7 @@ Reference this group by using
 | [featureFlags](#featureflags)         | `object`  | Optional | cannot be null | [AppConfig](schema-definitions-featureflagsconfig.md "https&#x3A;//cloud.redhat.com/schemas/clowder-appconfig#/definitions/AppConfig/properties/featureFlags")                        |
 | [endpoints](#endpoints)               | `array`   | Optional | cannot be null | [AppConfig](schema-definitions-appconfig-properties-endpoints.md "https&#x3A;//cloud.redhat.com/schemas/clowder-appconfig#/definitions/AppConfig/properties/endpoints")               |
 | [privateEndpoints](#privateendpoints) | `array`   | Optional | cannot be null | [AppConfig](schema-definitions-appconfig-properties-privateendpoints.md "https&#x3A;//cloud.redhat.com/schemas/clowder-appconfig#/definitions/AppConfig/properties/privateEndpoints") |
+| [BOPURL](#bopurl)                     | `string`  | Optional | cannot be null | [AppConfig](schema-definitions-appconfig-properties-bopurl.md "https&#x3A;//cloud.redhat.com/schemas/clowder-appconfig#/definitions/AppConfig/properties/BOPURL")                     |
 
 ### privatePort
 
@@ -265,6 +266,22 @@ Feature Flags Configuration
 #### privateEndpoints Type
 
 `object[]` ([Details](schema-definitions-privatedependencyendpoint.md))
+
+### BOPURL
+
+Defines the path to the BOPURL.
+
+
+`BOPURL`
+
+-   is optional
+-   Type: `string`
+-   cannot be null
+-   defined in: [AppConfig](schema-definitions-appconfig-properties-bopurl.md "https&#x3A;//cloud.redhat.com/schemas/clowder-appconfig#/definitions/AppConfig/properties/BOPURL")
+
+#### BOPURL Type
+
+`string`
 
 ## Definitions group LoggingConfig
 
@@ -1089,6 +1106,7 @@ Reference this group by using
 | [hostname](#hostname-3)                 | `string`  | Required | cannot be null | [AppConfig](schema-definitions-featureflagsconfig-properties-hostname.md "https&#x3A;//cloud.redhat.com/schemas/clowder-appconfig#/definitions/FeatureFlagsConfig/properties/hostname")                   |
 | [port](#port-3)                         | `integer` | Required | cannot be null | [AppConfig](schema-definitions-featureflagsconfig-properties-port.md "https&#x3A;//cloud.redhat.com/schemas/clowder-appconfig#/definitions/FeatureFlagsConfig/properties/port")                           |
 | [clientAccessToken](#clientaccesstoken) | `string`  | Optional | cannot be null | [AppConfig](schema-definitions-featureflagsconfig-properties-clientaccesstoken.md "https&#x3A;//cloud.redhat.com/schemas/clowder-appconfig#/definitions/FeatureFlagsConfig/properties/clientAccessToken") |
+| [scheme](#scheme)                       | `string`  | Required | cannot be null | [AppConfig](schema-definitions-featureflagsconfig-properties-scheme.md "https&#x3A;//cloud.redhat.com/schemas/clowder-appconfig#/definitions/FeatureFlagsConfig/properties/scheme")                       |
 
 ### hostname
 
@@ -1137,6 +1155,31 @@ Defines the client access token to use when connect to the FeatureFlags server
 #### clientAccessToken Type
 
 `string`
+
+### scheme
+
+Details the scheme to use for FeatureFlags http/https
+
+
+`scheme`
+
+-   is required
+-   Type: `string`
+-   cannot be null
+-   defined in: [AppConfig](schema-definitions-featureflagsconfig-properties-scheme.md "https&#x3A;//cloud.redhat.com/schemas/clowder-appconfig#/definitions/FeatureFlagsConfig/properties/scheme")
+
+#### scheme Type
+
+`string`
+
+#### scheme Constraints
+
+**enum**: the value of this property must be equal to one of the following values:
+
+| Value     | Explanation |
+| :-------- | ----------- |
+| `"http"`  |             |
+| `"https"` |             |
 
 ## Definitions group InMemoryDBConfig
 
