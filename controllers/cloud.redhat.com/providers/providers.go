@@ -19,6 +19,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	DB_DEFAULT = "1Gi"
+	DB_SMALL   = "2Gi"
+	DB_MEDIUM  = "3Gi"
+	DB_LARGE   = "5Gi"
+)
+
 type providerAccessor struct {
 	SetupProvider func(c *Provider) (ClowderProvider, error)
 	Order         int
